@@ -4,7 +4,7 @@ namespace bx {
 namespace amd64 {
 
 int Pseudo::__last_pseudo_id = 0;
-
+// guillaume ta geule
 std::ostream &operator<<(std::ostream &out, Pseudo const &p) {
   if (!p.binding.has_value())
     return out << "<pseudo#" << p.id << '>';
