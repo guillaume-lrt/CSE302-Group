@@ -1,0 +1,9 @@
+var x = 0, y = 1 : int64;
+var z : int64;
+
+while (x < 2000) {
+  print x;
+  z = x;
+  x = y;
+  y = z + y;
+}

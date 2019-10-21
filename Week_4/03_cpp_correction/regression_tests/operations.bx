@@ -1,0 +1,40 @@
+var x = 10 : int64;
+var y = 20 : int64;
+print x;
+print y;
+print x + y; // 30
+print x - y; // -10
+print x * y; // 200
+print y / x; // 2
+print y / 3; // 6
+print y % x; // 0
+print y % 3; // 2
+print x >> 1; // 5
+print x << 1; // 20
+print x >> (y % 6); // 2
+print x << (y % 6); // 40
+print x & y; // 0
+print x | y; // 30
+print x ^ y; // 30
+print - x; // -10
+print ~ x; // -11
+print x == y; // false
+print x != y; // true
+print x * 2 == y; // true
+print true || true; // true
+print 1 == 1 || false; // true
+print x < y; // true
+print x > y; // false
+print x < x; // false
+print x <= y; // true
+print x >= y; // false
+print x <= x; // true
+print x <= y || y <= x; // true
+print x == x; // true
+print true == true; // true
+print true == false; // false
+print false;
+print false == false; // true
+print false == true; // false
+print ! (x == x); // false
+print ! (x != x); // true

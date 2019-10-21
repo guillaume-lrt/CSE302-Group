@@ -1,0 +1,26 @@
+// Compute Collatz sequences
+
+
+// these are good test cases
+// var cur = 9 : int64;
+// var cur = 97 : int64;
+// var cur = 871 : int64;
+// var cur = 6171 : int64;
+// var cur = 77031 : int64;
+var cur = 837799 : int64;
+// var cur = 8400511 : int64;
+// var cur = 63728127 : int64;
+// var cur = 670617279 : int64;
+// var cur = 9780657630 : int64;
+// var cur = 75128138247 : int64;
+// var cur = 989345275647 : int64;
+
+while (cur != 1) {
+  print cur;
+  if (cur % 2 == 0) {
+    cur = cur >> 1;
+  } else {
+    cur = 3 * cur + 1;
+  }
+}
+print 1;
