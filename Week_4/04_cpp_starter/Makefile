@@ -24,14 +24,15 @@ spotless: clean
 	rm -f $(filter-out $(wildcard $(REGRESSION_DIR)/*.bx),$(wildcard $(REGRESSION_DIR)/*))
 
 ### Change this to point to wherever you placed the BX interpreter
-BX_INTERPRETER := ../03_interp/interpret.exe
+### BX_INTERPRETER := ../03_interp/interpret.exe
+BX_INTERPRETER := /users/profs/info/kaustuv.chaudhuri/CSE302/BX2/interpret.exe
 
 .PHONY: tests
 tests: $(TARGET)
 	for f in $(wildcard regression_tests/*.bx) ; do \
 	  build/$(TARGET) $$f ; \
 	  $${f%bx}exe > $${f%bx}actual ; \
-	  ../03_interp/interpret.exe $$f > $${f%bx}expected ; \
+	  ${BX_INTERPRETER} $$f > $${f%bx}expected ; \
 	  diff $${f%bx}expected $${f%bx}actual ; \
 	  if test $$? -ne 0 ; then \
 	    echo Test $$f failed ; \

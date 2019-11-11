@@ -42,8 +42,10 @@ struct RtlGen : public source::StmtVisitor, public source::ExprVisitor {
   rtl::Pseudo result{-1};
 
 private:
-  source::Program const &source_prog;
-  rtl::Callable rtl_cbl;
+  /**
+   * The RTL program that is accumulating instructions
+   */
+  rtl::Program &prog;
 
   /**
    * Mapping from variables to pseudos
@@ -54,14 +56,10 @@ private:
    * Check if the variable is mapped to a pseudo; if not, create a fresh such
    * mapping. Return the pseudo in either case.
    */
-  rtl::Pseudo get_pseudo(std::string const &v) {
-    if (var_table.find(v) == var_table.end())
-      var_table.insert_or_assign(v, fresh_pseudo());
-    return var_table.at(v);
-  }
-
   rtl::Pseudo get_pseudo(source::Variable const &v) {
-    return get_pseudo(v.label);
+    if (var_table.find(v.label) == var_table.end())
+      var_table.insert({v.label, fresh_pseudo()});
+    return var_table.at(v.label);
   }
 
   /**
@@ -74,7 +72,7 @@ private:
   template <typename LabelUser>
   inline void add_sequential(LabelUser use_label) {
     auto next_label = fresh_label();
-    rtl_cbl.add_instr(in_label, use_label(next_label));
+    prog.add_instr(in_label, use_label(next_label));
     in_label = next_label;
   }
 
@@ -84,8 +82,8 @@ private:
   void intify() {
     result = fresh_pseudo();
     auto next_label = fresh_label();
-    rtl_cbl.add_instr(in_label, Move::make(1, result, next_label));
-    rtl_cbl.add_instr(false_label, Move::make(0, result, next_label));
+    prog.add_instr(in_label, new rtl::Move(1, result, next_label));
+    prog.add_instr(false_label, new rtl::Move(0, result, next_label));
     in_label = next_label;
   }
 
@@ -94,68 +92,31 @@ private:
    */
   rtl::Pseudo copy_of_result() {
     auto reg = fresh_pseudo();
-    add_sequential([&](auto next) { return Copy::make(result, reg, next); });
+    add_sequential([&](auto next) { return new rtl::Copy(result, reg, next); });
     return reg;
   }
 
 public:
-  RtlGen(source::Program const &source_prog, std::string const &name)
-      : source_prog{source_prog}, rtl_cbl{name} {
-    auto &cbl = source_prog.callables.at(rtl_cbl.name);
-    // input pseudos
-    for (auto const &param : cbl->args) {
-      Pseudo reg = get_pseudo(param.first);
-      rtl_cbl.input_regs.push_back(reg);
-    }
-    // output pseudo
-    rtl_cbl.output_reg =
-        cbl->return_ty == Type::UNKNOWN ? rtl::discard_pr : fresh_pseudo();
-    // enter and leave labels
-    rtl_cbl.enter = fresh_label();
-    rtl_cbl.leave = fresh_label();
-    // process all the statements
-    in_label = rtl_cbl.enter;
-    cbl->body->accept(*this);
-    // add an unconditional jump to exit for procedures
-    if (cbl->return_ty == Type::UNKNOWN)
-      rtl_cbl.add_instr(in_label, Goto::make(rtl_cbl.leave));
-    rtl_cbl.add_instr(rtl_cbl.leave, Return::make(rtl_cbl.output_reg));
-  }
-
-  rtl::Callable &&deliver() { return std::move(rtl_cbl); }
-
-  void visit(source::Declare const &dec) override {
-    auto pr = get_pseudo(dec.var);
-    dec.init->accept(*this);
-    if (dec.ty == Type::BOOL)
-      intify();
-    add_sequential([&](auto next) { return Copy::make(result, pr, next); });
-  }
+  RtlGen(rtl::Program &prog, rtl::Label in_label)
+      : in_label{in_label}, prog{prog} {}
 
   void visit(source::Assign const &mv) override {
-    auto source_reg = get_pseudo(mv.left);
+    auto source_reg = get_pseudo(*mv.left);
     mv.right->accept(*this);
     if (mv.right->meta->ty == Type::BOOL)
       intify();
     add_sequential(
-        [&](auto next) { return Copy::make(result, source_reg, next); });
-  }
-
-  void visit(source::Eval const &ev) override {
-    ev.expr->accept(*this);
-    if (ev.expr->meta->ty == Type::BOOL)
-      intify();
+        [&](auto next) { return new rtl::Copy(result, source_reg, next); });
   }
 
   void visit(source::Print const &pr) override {
     pr.arg->accept(*this);
     if (pr.arg->meta->ty == Type::BOOL)
       intify();
-    std::string func =
-        pr.arg->meta->ty == Type::INT64 ? "bx_print_int" : "bx_print_bool";
+    auto func =
+        pr.arg->meta->ty == Type::INT64 ? "bx1_print_int" : "bx1_print_bool";
     add_sequential([&](auto next) {
-      return Call::make(func, std::vector<Pseudo>{result}, rtl::discard_pr,
-                        next);
+      return new rtl::Call(func, {result}, rtl::discard_pr, next);
     });
   }
 
@@ -172,11 +133,11 @@ public:
     // put the then-block at the then_label
     in_label = then_label;
     ie.true_branch->accept(*this);
-    rtl_cbl.add_instr(in_label, Goto::make(next_label));
+    prog.add_instr(in_label, new rtl::Goto(next_label));
     // put the else-block at the else_label
     in_label = else_label;
     ie.false_branch->accept(*this);
-    rtl_cbl.add_instr(in_label, Goto::make(next_label));
+    prog.add_instr(in_label, new rtl::Goto(next_label));
     // now both branches have reached next_label
     in_label = next_label;
   }
@@ -188,24 +149,8 @@ public:
     // save a copy of the false_label as that is the ultimate exit label
     auto condition_exit_label = false_label;
     wh.loop_body->accept(*this);
-    rtl_cbl.add_instr(in_label, Goto::make(while_enter_label));
+    prog.add_instr(in_label, new rtl::Goto(while_enter_label));
     in_label = condition_exit_label;
-  }
-
-  void visit(source::Return const &ret) override {
-    if (ret.arg) {
-      ret.arg->accept(*this);
-      if (ret.arg->meta->ty == Type::BOOL)
-        intify();
-      if (rtl_cbl.output_reg != rtl::discard_pr)
-        add_sequential([&](auto next) {
-          return Copy::make(result, rtl_cbl.output_reg, next);
-        });
-    }
-    add_sequential([&](auto next) {
-      (void)next; // suppress unused warning
-      return Goto::make(rtl_cbl.leave);
-    });
   }
 
   void visit(source::Variable const &v) override {
@@ -213,15 +158,16 @@ public:
     if (v.meta->ty == Type::BOOL) {
       false_label = fresh_label();
       add_sequential([&](auto next) {
-        return Ubranch::make(rtl::Ubranch::JNZ, result, next, false_label);
+        return new rtl::Ubranch(rtl::Ubranch::JNZ, result, next, false_label);
       });
     }
   }
 
   void visit(source::IntConstant const &k) override {
     result = fresh_pseudo();
-    add_sequential(
-        [&](auto next_lab) { return Move::make(k.value, result, next_lab); });
+    add_sequential([&](auto next_lab) {
+      return new rtl::Move(k.value, result, next_lab);
+    });
   }
 
   void visit(source::BoolConstant const &k) override {
@@ -243,7 +189,7 @@ public:
       auto rtl_op =
           uo.op == source::Unop::BitNot ? rtl::Unop::NOT : rtl::Unop::NEG;
       add_sequential(
-          [&](auto next) { return Unop::make(rtl_op, result, next); });
+          [&](auto next) { return new rtl::Unop(rtl_op, result, next); });
     } break;
     case source::Unop::LogNot: {
       auto l = false_label;
@@ -278,25 +224,25 @@ public:
     bo.right_arg->accept(*this);
     auto right_result = result;
     add_sequential([&](auto next) {
-      return Binop::make(rtl_op, right_result, left_result, next);
+      return new rtl::Binop(rtl_op, right_result, left_result, next);
     });
     result = left_result;
   }
 
   void visitBoolBinop(source::BinopApp const &bo) {
-    if (bo.op != source::Binop::BoolAnd && bo.op != source::Binop::BoolOr)
+    if (bo.op != source::Binop::LogAnd && bo.op != source::Binop::LogOr)
       return; // case not relevant
     bo.left_arg->accept(*this);
     auto left_true_label = in_label, left_false_label = false_label;
     in_label =
-        bo.op == source::Binop::BoolAnd ? left_true_label : left_false_label;
+        bo.op == source::Binop::LogAnd ? left_true_label : left_false_label;
     bo.right_arg->accept(*this);
     auto right_true_label = in_label, right_false_label = false_label;
-    if (bo.op == source::Binop::BoolAnd) {
-      rtl_cbl.add_instr(right_false_label, Goto::make(left_false_label));
+    if (bo.op == source::Binop::LogAnd) {
+      prog.add_instr(right_false_label, new rtl::Goto(left_false_label));
       false_label = left_false_label;
     } else {
-      rtl_cbl.add_instr(right_true_label, Goto::make(left_true_label));
+      prog.add_instr(right_true_label, new rtl::Goto(left_true_label));
       in_label = left_true_label;
     }
   }
@@ -318,8 +264,8 @@ public:
     auto right_result = result; // save
     false_label = fresh_label();
     add_sequential([&](auto next) {
-      return Bbranch::make(rtl_op, left_result, right_result, next,
-                           false_label);
+      return new rtl::Bbranch(rtl_op, left_result, right_result, next,
+                              false_label);
     });
   }
 
@@ -337,7 +283,7 @@ public:
     auto bbr_op =
         bo.op == source::Binop::Eq ? rtl::Bbranch::JE : rtl::Bbranch::JNE;
     add_sequential([&](auto next) {
-      return Bbranch::make(bbr_op, left_result, result, next, false_label);
+      return new rtl::Bbranch(bbr_op, left_result, result, next, false_label);
     });
   }
 
@@ -348,28 +294,19 @@ public:
     visitIneqop(bo);
     visitEqop(bo);
   }
-
-  void visit(source::Call const &ca) override {
-    std::vector<Pseudo> args;
-    for (auto const &e : ca.args) {
-      e->accept(*this);
-      args.push_back(result);
-    }
-    result = source_prog.callables.at(ca.func)->return_ty == Type::UNKNOWN
-                 ? rtl::discard_pr
-                 : fresh_pseudo();
-    add_sequential(
-        [&](auto next) { return Call::make(ca.func, args, result, next); });
-  }
 };
 
 rtl::Program transform(source::Program const &src_prog) {
-  rtl::Program rtl_prog;
-  for (auto const &cbl : src_prog.callables) {
-    RtlGen gen{src_prog, cbl.first};
-    rtl_prog.push_back(gen.deliver());
-  }
-  return rtl_prog;
+  rtl::Program rtl{"main"};
+  rtl.enter = rtl::Label{last_label++};
+  RtlGen gen{rtl, rtl.enter};
+  for (auto const &stmt : src_prog.body)
+    stmt->accept(gen);
+  auto return_pr = fresh_pseudo();
+  rtl.leave = fresh_label();
+  rtl.add_instr(gen.in_label, new rtl::Move(0, return_pr, rtl.leave));
+  rtl.add_instr(rtl.leave, new rtl::Return(return_pr));
+  return rtl;
 }
 
 } // namespace rtl
