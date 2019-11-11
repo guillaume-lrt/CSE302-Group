@@ -46,6 +46,8 @@ using InstrPtr = std::unique_ptr<Instr const>;
 
 struct Move;
 struct Copy;
+struct CopyMP; // New: Mem -> Pseudo
+struct CopyPM; // New: Pseudo -> Mem
 struct Load;
 struct Store;
 struct Binop;
@@ -61,6 +63,8 @@ struct InstrVisitor {
 #define VISIT_FUNCTION(caseclass) virtual void visit(caseclass const &) = 0
   VISIT_FUNCTION(Move);
   VISIT_FUNCTION(Copy);
+  VISIT_FUNCTION(CopyMP); // New
+  VISIT_FUNCTION(CopyPM); // New
   VISIT_FUNCTION(Load);
   VISIT_FUNCTION(Store);
   VISIT_FUNCTION(Binop);
@@ -110,6 +114,34 @@ struct Copy : public Instr {
   CONSTRUCTOR(Copy, Pseudo src, Pseudo dest, Label succ)
       : src{src}, dest{dest}, succ{succ} {}
 };
+
+struct CopyMP : public Instr {
+  // New 
+  const char* src;
+  Pseudo dest;
+  Label succ;
+
+  std::ostream &print(std::ostream &out) const override {
+    return out << "copy " << src << ", " << dest << "  --> " << succ;
+  }
+  MAKE_VISITABLE
+  CONSTRUCTOR(CopyMP, const char* src, Pseudo dest, Label succ)
+      : src{src}, dest{dest}, succ{succ} {}
+}
+
+struct CopyPM : public Instr {
+  // New 
+  Pseudo src;
+  const char* dest;
+  Label succ;
+
+  std::ostream &print(std::ostream &out) const override {
+    return out << "copy " << src << ", " << dest << "  --> " << succ;
+  }
+  MAKE_VISITABLE
+  CONSTRUCTOR(CopyMP, const char* src, Pseudo dest, Label succ)
+      : src{src}, dest{dest}, succ{succ} {}
+}
 
 struct Load : public Instr {
   std::string src;
