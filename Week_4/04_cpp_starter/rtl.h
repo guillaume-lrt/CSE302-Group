@@ -137,7 +137,7 @@ struct CopyMP : public Instr {
   MAKE_VISITABLE
   CONSTRUCTOR(CopyMP, const char* src, Pseudo dest, Label succ)
       : src{src}, dest{dest}, succ{succ} {}
-}
+};
 
 struct CopyPM : public Instr {
   // New 
@@ -151,7 +151,7 @@ struct CopyPM : public Instr {
   MAKE_VISITABLE
   CONSTRUCTOR(CopyPM, Pseudo src, const char* dest, Label succ)
       : src{src}, dest{dest}, succ{succ} {}
-}
+};
 
 struct Load : public Instr {
   std::string src;
@@ -310,7 +310,6 @@ struct Return : public Instr {
   MAKE_VISITABLE
   CONSTRUCTOR(Return, Pseudo arg) : arg{arg} {}
 };
-#undef MAKE_VISITABLE
 
 struct NewFrame : public Instr {
   Label succ;
@@ -322,7 +321,7 @@ struct NewFrame : public Instr {
   MAKE_VISITABLE
   CONSTRUCTOR(NewFrame, Label succ, int size) :
     succ{succ}, size{size} {}
-}
+};
 
 struct DelFrame : public Instr {
   Label succ;
@@ -333,7 +332,7 @@ struct DelFrame : public Instr {
   MAKE_VISITABLE
   CONSTRUCTOR(DelFrame, Label succ) :
     succ{succ} {}
-}
+};
 
 struct LoadParam : public Instr {
   int64_t src;
@@ -346,7 +345,7 @@ struct LoadParam : public Instr {
   MAKE_VISITABLE
   CONSTRUCTOR(LoadParam, int64_t src, Pseudo dest, Label succ) :
     src{src}, dest{dest}, succ{succ} {}
-}
+};
 
 struct Push : public Instr {
   Pseudo dest;
@@ -358,7 +357,7 @@ struct Push : public Instr {
   MAKE_VISITABLE
   CONSTRUCTOR(Push, Pseudo dest, Label succ) :
     dest{dest}, succ{succ} {}
-}
+};
 
 struct Pop : public Instr {
   Pseudo dest;
@@ -370,7 +369,9 @@ struct Pop : public Instr {
   MAKE_VISITABLE
   CONSTRUCTOR(Pop, Pseudo dest, Label succ) :
     dest{dest}, succ{succ} {}
-}
+};
+
+#undef MAKE_VISITABLE
 
 struct LabelHash {
   std::size_t operator()(Label const &l) const noexcept {
