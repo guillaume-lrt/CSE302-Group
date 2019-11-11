@@ -57,6 +57,11 @@ struct Ubranch;
 struct Goto;
 struct Call;
 struct Return;
+struct NewFrame; // New: Frame
+struct DelFrame; // New: Frame
+struct LoadParam; // New: ???
+struct Push; // New: ???
+struct Pop; // New: ???
 
 struct InstrVisitor {
   virtual ~InstrVisitor() = default;
@@ -74,6 +79,11 @@ struct InstrVisitor {
   VISIT_FUNCTION(Goto);
   VISIT_FUNCTION(Call);
   VISIT_FUNCTION(Return);
+  VISIT_FUNCTION(NewFrame); // New
+  VISIT_FUNCTION(DelFrame); // New
+  VISIT_FUNCTION(LoadParam); // New
+  VISIT_FUNCTION(Push); // New
+  VISIT_FUNCTION(Pop); // New
 #undef VISIT_FUNCTION
 };
 
@@ -139,7 +149,7 @@ struct CopyPM : public Instr {
     return out << "copy " << src << ", " << dest << "  --> " << succ;
   }
   MAKE_VISITABLE
-  CONSTRUCTOR(CopyMP, const char* src, Pseudo dest, Label succ)
+  CONSTRUCTOR(CopyPM, Pseudo src, const char* dest, Label succ)
       : src{src}, dest{dest}, succ{succ} {}
 }
 
@@ -301,6 +311,66 @@ struct Return : public Instr {
   CONSTRUCTOR(Return, Pseudo arg) : arg{arg} {}
 };
 #undef MAKE_VISITABLE
+
+struct NewFrame : public Instr {
+  Label succ;
+  int size;
+
+  std::ostream &print(std::ostream &out) const override {
+    return out << "newframe " << size << "  --> " << succ;
+  }
+  MAKE_VISITABLE
+  CONSTRUCTOR(NewFrame, Label succ, int size) :
+    succ{succ}, size{size} {}
+}
+
+struct DelFrame : public Instr {
+  Label succ;
+
+  std::ostream &print(std::ostream &out) const override {
+    return out << "delframe " << "  --> " << succ;
+  }
+  MAKE_VISITABLE
+  CONSTRUCTOR(DelFrame, Label succ) :
+    succ{succ} {}
+}
+
+struct LoadParam : public Instr {
+  int64_t src;
+  Pseudo dest;
+  Label succ;
+  
+  std::ostream &print(std::ostream &out) const override {
+    return out << "loadparam " << src << ", " << dest << "  --> " << succ;
+  }
+  MAKE_VISITABLE
+  CONSTRUCTOR(LoadParam, int64_t src, Pseudo dest, Label succ) :
+    src{src}, dest{dest}, succ{succ} {}
+}
+
+struct Push : public Instr {
+  Pseudo dest;
+  Label succ;
+
+  std::ostream &print(std::ostream &out) const override {
+    return out << "push " << dest << "  --> " << succ;
+  }
+  MAKE_VISITABLE
+  CONSTRUCTOR(Push, Pseudo dest, Label succ) :
+    dest{dest}, succ{succ} {}
+}
+
+struct Pop : public Instr {
+  Pseudo dest;
+  Label succ;
+
+  std::ostream &print(std::ostream &out) const override {
+    return out << "pop " << dest << "  --> " << succ;
+  }
+  MAKE_VISITABLE
+  CONSTRUCTOR(Pop, Pseudo dest, Label succ) :
+    dest{dest}, succ{succ} {}
+}
 
 struct LabelHash {
   std::size_t operator()(Label const &l) const noexcept {
