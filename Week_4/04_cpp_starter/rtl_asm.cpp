@@ -217,21 +217,62 @@ public:
   }
 
   void visit(rtl::Return const &ret) override {
-    Pseudo arg = lookup(ret.arg);
-    append(Asm::movq(arg, Pseudo{reg::rax}));
-    append(Asm::jmp(exit_label));
+    append(Asm::ret());
   }
 
   void visit(rtl::Goto const &go) override {
     append(Asm::jmp(label_translate(go.succ)));
   }
+
+  void visit(rtl::CopyMP const &p) override {
+    append(Asm::movq(Pseudo{p.src}, lookup(p.dest))); // mov src-mem, dst-val
+    append(Asm::jmp(label_translate(p.succ)));
+  }
+
+  void visit(rtl::CopyPM const &p) override {
+    append(Asm::movq(lookup(p.src), Pseudo{reg::r11})); // mov src-val, %r11
+    append(Asm::movq(Pseudo{reg::r11}, Pseudo{p.dest})); // mov %r11, dst-val
+    append(Asm::jmp(label_translate(p.succ)));
+  }
+
+  void visit(rtl::NewFrame const &p) override {
+    append(Asm::pushq(Pseudo{reg::rbp})); // mov %rbp
+    append(Asm::movq(Pseudo{reg::rsp}, Pseudo{reg::rbp})); // mov %rsp, %rbp
+    // TODO: Allocate memory
+    append(Asm::jmp(label_translate(p.succ)));
+  }
+
+  void visit(rtl::DelFrame const &p) override {
+    // TODO: Confirm that there is no ret
+    append(Asm::movq(Pseudo{reg::rbp}, Pseudo{reg::rsp})); // mov %rbp, %rsp
+    append(Asm::popq(Pseudo{reg::rbp})); // pop %rbp
+    append(Asm::jmp(label_translate(p.succ)));    
+  }
+
+  void visit(rtl::LoadParam const &p) override {
+    // TODO: Load parameters from stack
+    append(Asm::jmp(label_translate(p.succ)));    
+  }
+
+  void visit(rtl::Push const &p) override {
+    append(Asm::pushq(lookup(p.dest)));
+    append(Asm::jmp(label_translate(p.succ)));
+  }
+
+  void visit(rtl::Pop const &p) override {
+    append(Asm::popq(lookup(p.dest)));
+    append(Asm::jmp(label_translate(p.succ)));
+  }
+  // TODO: visit(Load) and visit(Store)
 };
 
 AsmProgram rtl_to_asm(rtl::Program const &prog) {
-  InstrCompiler icomp{prog.name};
-  for (auto const &l : prog.schedule) {
-    icomp.append_label(l);
-    prog.body.find(l)->second->accept(icomp);
+  for (auto const &callable : prog) {
+    InstrCompiler icomp{callable.name};
+    for (auto const &l : c.schedule) {
+      icomp.append_label(l);
+      c.body.find(l)->second->accept(icomp);
+    }
   }
   return icomp.finalize();
 }
