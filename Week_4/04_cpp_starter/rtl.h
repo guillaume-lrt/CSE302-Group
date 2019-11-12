@@ -14,8 +14,8 @@
 #ifndef CONSTRUCTOR
 #define CONSTRUCTOR(Cls, ...)                                                  \
   template <typename... Args>                                                  \
-  static std::unique_ptr<Cls const> make(Args &&... args) {                    \
-    return std::unique_ptr<Cls>{new Cls(std::forward<Args>(args)...)};         \
+  static Cls* make(Args &&... args) {                                          \
+    return new Cls(std::forward<Args>(args)...);                               \
   }                                                                            \
                                                                                \
 private:                                                                       \
@@ -42,7 +42,7 @@ std::ostream &operator<<(std::ostream &out, Pseudo const &r);
 constexpr Pseudo discard_pr{-1};
 
 struct Instr;
-using InstrPtr = std::unique_ptr<Instr const>;
+using InstrPtr = Instr*;
 
 struct Move;
 struct Copy;
@@ -57,11 +57,11 @@ struct Ubranch;
 struct Goto;
 struct Call;
 struct Return;
-struct NewFrame; // New: Frame
-struct DelFrame; // New: Frame
-struct LoadParam; // New: ???
-struct Push; // New: ???
-struct Pop; // New: ???
+struct NewFrame; // New: Frame begin
+struct DelFrame; // New: Frame end
+struct LoadParam; // New: Load from stack + offset
+struct Push; // New: Push to stack
+struct Pop; // New: Pop from stack
 
 struct InstrVisitor {
   virtual ~InstrVisitor() = default;
@@ -126,8 +126,7 @@ struct Copy : public Instr {
 };
 
 struct CopyMP : public Instr {
-  // New 
-  const char* src;
+  char const* src;
   Pseudo dest;
   Label succ;
 
@@ -135,21 +134,20 @@ struct CopyMP : public Instr {
     return out << "copy " << src << ", " << dest << "  --> " << succ;
   }
   MAKE_VISITABLE
-  CONSTRUCTOR(CopyMP, const char* src, Pseudo dest, Label succ)
+  CONSTRUCTOR(CopyMP, char const* src, Pseudo dest, Label succ)
       : src{src}, dest{dest}, succ{succ} {}
 };
 
 struct CopyPM : public Instr {
-  // New 
   Pseudo src;
-  const char* dest;
+  char const* dest;
   Label succ;
 
   std::ostream &print(std::ostream &out) const override {
     return out << "copy " << src << ", " << dest << "  --> " << succ;
   }
   MAKE_VISITABLE
-  CONSTRUCTOR(CopyPM, Pseudo src, const char* dest, Label succ)
+  CONSTRUCTOR(CopyPM, Pseudo src, char const* dest, Label succ)
       : src{src}, dest{dest}, succ{succ} {}
 };
 
@@ -282,38 +280,28 @@ struct Goto : public Instr {
 
 struct Call : public Instr {
   std::string func;
-  std::vector<Pseudo> args;
-  Pseudo ret;
+  int n;
   Label succ;
 
   std::ostream &print(std::ostream &out) const override {
-    out << "call " << func << "(";
-    for (auto it = args.cbegin(); it != args.cend(); it++) {
-      out << *it;
-      if (it + 1 != args.cend())
-        out << ", ";
-    }
-    return out << "), " << ret << "  --> " << succ;
+    return out << "call " << func << "(" << n << ")  --> " << succ;
   }
   MAKE_VISITABLE
-  CONSTRUCTOR(Call, std::string func, std::vector<Pseudo> args, Pseudo ret,
-              Label succ)
-      : func{func}, args{args}, ret{ret}, succ{succ} {}
+  CONSTRUCTOR(Call, std::string func, int n, Label succ)
+      : func{func}, n(n), succ{succ} {}
 };
 
 struct Return : public Instr {
-  Pseudo arg;
-
   std::ostream &print(std::ostream &out) const override {
-    return out << "return " << arg;
+    return out << "return ";
   }
   MAKE_VISITABLE
-  CONSTRUCTOR(Return, Pseudo arg) : arg{arg} {}
+  CONSTRUCTOR(Return) {}
 };
 
 struct NewFrame : public Instr {
   Label succ;
-  int size;
+  int size; // Allocate memory at this step
 
   std::ostream &print(std::ostream &out) const override {
     return out << "newframe " << size << "  --> " << succ;
@@ -327,7 +315,7 @@ struct DelFrame : public Instr {
   Label succ;
 
   std::ostream &print(std::ostream &out) const override {
-    return out << "delframe " << "  --> " << succ;
+    return out << "delframe  --> " << succ;
   }
   MAKE_VISITABLE
   CONSTRUCTOR(DelFrame, Label succ) :
@@ -335,16 +323,16 @@ struct DelFrame : public Instr {
 };
 
 struct LoadParam : public Instr {
-  int64_t src;
+  int64_t offset;
   Pseudo dest;
   Label succ;
   
   std::ostream &print(std::ostream &out) const override {
-    return out << "loadparam " << src << ", " << dest << "  --> " << succ;
+    return out << "loadparam " << offset << ", " << dest << "  --> " << succ;
   }
   MAKE_VISITABLE
-  CONSTRUCTOR(LoadParam, int64_t src, Pseudo dest, Label succ) :
-    src{src}, dest{dest}, succ{succ} {}
+  CONSTRUCTOR(LoadParam, int64_t offset, Pseudo dest, Label succ) :
+    offset{offset}, dest{dest}, succ{succ} {}
 };
 
 struct Push : public Instr {

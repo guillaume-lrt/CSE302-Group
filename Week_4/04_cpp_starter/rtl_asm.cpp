@@ -89,8 +89,8 @@ public:
   }
 
   void visit(rtl::Copy const &cp) override {
-    append(Asm::movq(lookup(cp.src), Pseudo{reg::rax}));
-    append(Asm::movq(Pseudo{reg::rax}, lookup(cp.dest)));
+    append(Asm::movq(lookup(cp.src), Pseudo{reg::r11}));
+    append(Asm::movq(Pseudo{reg::r11}, lookup(cp.dest)));
     append(Asm::jmp(label_translate(cp.succ)));
   }
 
@@ -206,13 +206,7 @@ public:
   }
 
   void visit(rtl::Call const &c) override {
-    // TODO: handle more than one argument
-    assert(c.args.size() == 1);
-    Pseudo arg1 = lookup(c.args[0]);
-    append(Asm::movq(arg1, Pseudo{reg::rdi}));
     append(Asm::call(std::string{c.func}));
-    Pseudo ret = lookup(c.ret);
-    append(Asm::movq(Pseudo{reg::rax}, ret));
     append(Asm::jmp(label_translate(c.succ)));
   }
 
@@ -238,19 +232,20 @@ public:
   void visit(rtl::NewFrame const &p) override {
     append(Asm::pushq(Pseudo{reg::rbp})); // mov %rbp
     append(Asm::movq(Pseudo{reg::rsp}, Pseudo{reg::rbp})); // mov %rsp, %rbp
-    // TODO: Allocate memory
+    append(Asm::subq(8*p.size, Pseudo{reg::rsp}));
     append(Asm::jmp(label_translate(p.succ)));
   }
 
   void visit(rtl::DelFrame const &p) override {
-    // TODO: Confirm that there is no ret
     append(Asm::movq(Pseudo{reg::rbp}, Pseudo{reg::rsp})); // mov %rbp, %rsp
     append(Asm::popq(Pseudo{reg::rbp})); // pop %rbp
     append(Asm::jmp(label_translate(p.succ)));    
+    // No ret call
   }
 
   void visit(rtl::LoadParam const &p) override {
-    // TODO: Load parameters from stack
+    append(Asm::movq(8*(p.offset+1), Pseudo{reg::rbp}, Pseudo{reg::r11}));
+    append(Asm::movq(Pseudo{reg::r11}, lookup(p.dest)));
     append(Asm::jmp(label_translate(p.succ)));    
   }
 
@@ -263,18 +258,33 @@ public:
     append(Asm::popq(lookup(p.dest)));
     append(Asm::jmp(label_translate(p.succ)));
   }
-  // TODO: visit(Load) and visit(Store)
+
+  // TODO: Fix visit(Load) and visit(Store)
+
+  void visit(rtl::Load const &p) override {
+    append(Asm::movq(p.src, Pseudo{reg::rip}, Pseudo{reg::r11}));
+    append(Asm::movq(Pseudo{reg::r11}, lookup(p.dest)));
+    append(Asm::jmp(label_translate(p.succ)));
+  }
+
+  void visit(rtl::Store const &p) override {
+    append(Asm::movq(lookup(p.src), Pseudo{reg::r11}));
+    append(Asm::movq(Pseudo{reg::r11}, p.dest, Pseudo{reg::rip}));
+    append(Asm::jmp(label_translate(p.succ)));
+  }
 };
 
-AsmProgram rtl_to_asm(rtl::Program const &prog) {
+std::vector<AsmProgram> rtl_to_asm(rtl::Program const &prog) {
+  std::vector<AsmProgram> final_prog;
   for (auto const &callable : prog) {
     InstrCompiler icomp{callable.name};
-    for (auto const &l : c.schedule) {
+    for (auto const &l : callable.schedule) {
       icomp.append_label(l);
-      c.body.find(l)->second->accept(icomp);
+      callable.body.find(l)->second->accept(icomp);
     }
+    final_prog.push_back(icomp.finalize());
   }
-  return icomp.finalize();
+  return final_prog;
 }
 
 } // namespace bx

@@ -6,7 +6,7 @@
 namespace bx {
 namespace rtl {
 
-rtl::Program transform(source::Program const &prog);
+std::pair<rtl::Program, std::map<std::string, int>> transform(source::Program const &prog);
 
 } // namespace rtl
 } // namespace bx

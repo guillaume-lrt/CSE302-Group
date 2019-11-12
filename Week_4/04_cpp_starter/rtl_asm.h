@@ -7,6 +7,6 @@ namespace bx {
 
 using AsmProgram = std::vector<std::unique_ptr<amd64::Asm>>;
 
-AsmProgram rtl_to_asm(rtl::Program &);
+std::vector<AsmProgram> rtl_to_asm(rtl::Program const &prog);
 
 } // namespace bx

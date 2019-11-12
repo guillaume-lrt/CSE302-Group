@@ -15,6 +15,8 @@ inline rtl::Pseudo fresh_pseudo() { return rtl::Pseudo{last_pseudo++}; }
 int last_label = 0;
 inline rtl::Label fresh_label() { return rtl::Label{last_label++}; }
 
+std::map<std::string, int> global_vars;
+
 /**
  * A common generator for both expressions and statements
  *
@@ -50,15 +52,27 @@ private:
    * Mapping from variables to pseudos
    */
   std::unordered_map<std::string, rtl::Pseudo> var_table;
+  std::unordered_map<std::string, rtl::Pseudo> global_var_table;
 
   /**
    * Check if the variable is mapped to a pseudo; if not, create a fresh such
    * mapping. Return the pseudo in either case.
    */
-  rtl::Pseudo get_pseudo(source::Variable const &v) {
-    if (var_table.find(v.label) == var_table.end())
-      var_table.insert({v.label, fresh_pseudo()});
-    return var_table.at(v.label);
+  rtl::Pseudo get_pseudo(std::string const v) {
+    if (global_vars.find(v) == global_vars.end()) {
+      // Not a global var
+      if (var_table.find(v) == var_table.end())
+        var_table[v] = fresh_pseudo();
+      return var_table.at(v);
+    }
+    if (global_var_table.find(v) == global_var_table.end()) {
+      auto pseudo = fresh_pseudo();
+      add_sequential([&](auto next) {
+          return Load::make(v, 0, pseudo, next);
+      });
+      global_var_table[v] = pseudo;
+    }
+    return global_var_table.at(v);
   }
 
   /**
@@ -98,7 +112,98 @@ private:
 public:
   RtlGen(source::Program const &srcprog, std::string const &name)
     : srcprog{srcprog}, rtl_callable{name} {
-      // TODO
+      int pseudo_count = last_pseudo;
+
+      auto &func = srcprog.callables.at(rtl_callable.name);
+      // Basic information
+      for (auto &arg : func->args) {
+        rtl_callable.input_regs.push_back(get_pseudo(arg.first));
+      }
+      if (func->return_ty == Type::UNKNOWN) {
+        rtl_callable.output_reg = rtl::discard_pr;
+      }
+      else {
+        rtl_callable.output_reg = fresh_pseudo();
+      }
+      rtl_callable.enter = fresh_label();
+      rtl_callable.leave = fresh_label();
+      in_label = rtl_callable.enter;
+
+      // New frame
+      auto fl = fresh_label();
+      auto il = in_label;
+      in_label = fl;
+
+      // Save non-volatitle registers
+      std::vector<const char*> non_volatile_regs = {
+        bx::amd64::reg::rbx,
+        bx::amd64::reg::rbp,
+        bx::amd64::reg::r12,
+        bx::amd64::reg::r13,
+        bx::amd64::reg::r14,
+        bx::amd64::reg::r15,
+      };
+      std::vector<rtl::Pseudo> saved_ps;
+      for (auto nreg : non_volatile_regs) {
+        Pseudo pseudo = fresh_pseudo();
+        saved_ps.push_back(pseudo);
+        add_sequential([&] (auto next) {
+            return CopyMP::make(nreg, pseudo, next);
+        });
+      }
+
+      // Parse arguments
+      int arg_count = func->args.size();
+      std::vector<const char*> volatile_regs = {
+        bx::amd64::reg::rdi,
+        bx::amd64::reg::rsi,
+        bx::amd64::reg::rdx,
+        bx::amd64::reg::rcx,
+        bx::amd64::reg::r8,
+        bx::amd64::reg::r9,
+      };
+      for (int i = 0; i < std::min(arg_count, (int) volatile_regs.size()); i++) {
+        add_sequential([&] (auto next) {
+            return CopyMP::make(volatile_regs[i], rtl_callable.input_regs[i], next);
+        });
+      }
+      // More than 6 args -> On stack
+      if (arg_count > 6) {
+        for (int i = 6; i < arg_count; i++) {
+          add_sequential([&] (auto next) {
+              return LoadParam::make(i-5, rtl_callable.input_regs[i], next);
+          });
+        }
+      }
+
+      func->body->accept(*this);
+      
+      // Restore callee saved registers
+      for (int i = 0; i < 6; i++) {
+        add_sequential([&] (auto next) {
+            return CopyPM::make(saved_ps[i], non_volatile_regs[i], next);
+        });
+      }
+
+      // Return value in rax
+      if (func->return_ty != Type::UNKNOWN) {
+        add_sequential([&] (auto next) {
+            return CopyPM::make(rtl_callable.output_reg, bx::amd64::reg::rax, next);
+        });
+      }
+      rtl_callable.add_instr(rtl_callable.leave, Goto::make(in_label));
+
+      // Resize new frame
+      pseudo_count -= last_pseudo;
+      rtl_callable.add_instr(il, NewFrame::make(fl, pseudo_count));
+
+      // Finish
+      add_sequential([&] (auto next) {
+          return DelFrame::make(next);
+      });
+      add_sequential([&] (auto next) {
+          return Return::make();
+      });
   }
 
   void visit(source::Assign const &mv) override {
@@ -106,6 +211,11 @@ public:
     mv.right->accept(*this);
     if (mv.right->meta->ty == Type::BOOL)
       intify();
+    if (global_var_table.find(mv.left) != global_var_table.end()) {
+      add_sequential([&](auto next) {
+          return Store::make(result, mv.left, 0, next);
+      });
+    }
     add_sequential([&](auto next) {
       return Copy::make(result, source_reg, next);
     });
@@ -165,7 +275,6 @@ public:
     in_label = condition_exit_label;
   }
   void visit(source::Return const &ret) override {
-    // TODO
     if (ret.arg) {
       ret.arg->accept(*this);
       if (ret.arg->meta->ty == Type::BOOL) {
@@ -186,7 +295,7 @@ public:
   }
 
   void visit(source::Variable const &v) override {
-    result = get_pseudo(v);
+    result = get_pseudo(v.label);
     if (v.meta->ty == Type::BOOL) {
       false_label = fresh_label();
       add_sequential([&](auto next) {
@@ -197,8 +306,8 @@ public:
 
   void visit(source::IntConstant const &k) override {
     result = fresh_pseudo();
-    add_sequential([&](auto next_lab) {
-      return Move::make(k.value, result, next_lab);
+    add_sequential([&](auto next) {
+      return Move::make(k.value, result, next);
     });
   }
 
@@ -327,17 +436,69 @@ public:
   }
 
   void visit(source::Call const &p) override {
-    // TODO
+    std::vector<Pseudo> args;
+    for (auto &arg: p.args) {
+      arg->accept(*this);
+      args.push_back(result);
+    }
+
+    int arg_count = args.size();
+    std::vector<const char*> volatile_regs = {
+      bx::amd64::reg::rdi,
+      bx::amd64::reg::rsi,
+      bx::amd64::reg::rdx,
+      bx::amd64::reg::rcx,
+      bx::amd64::reg::r8,
+      bx::amd64::reg::r9,
+    };
+    for (int i = 0; i < std::min(arg_count, (int) volatile_regs.size()); i++) {
+      add_sequential([&] (auto next) {
+          return CopyPM::make(args[i], volatile_regs[i], next);
+      });
+    }
+    // More than 6 args -> Push to stack in reverse
+    if (arg_count > 6) {
+      for (int i = arg_count-1; i >= 6; i--) {
+        add_sequential([&] (auto next) {
+            return Push::make(args[i], next);
+        });
+      }
+    }
+
+    // Ending function
+    if (srcprog.callables.at(p.func)->return_ty == Type::UNKNOWN) {
+      add_sequential([&] (auto next) {
+          return Call::make(p.func, arg_count, next);
+      });
+      result = rtl::discard_pr;
+    }
+    else {
+      add_sequential([&] (auto next) {
+          return Call::make(p.func, arg_count, next);
+      });
+      add_sequential([&] (auto next) {
+          return CopyMP::make(bx::amd64::reg::rax, result, next);
+      });
+      result = fresh_pseudo();
+    }
   }
 };
 
-rtl::Program transform(source::Program const &src_prog) {
+std::pair<rtl::Program, std::map<std::string, int>> transform(source::Program const &src_prog) {
   rtl::Program rtl_prog;
-  for (auto &callable : src_prog.callables) {
-    RtlGen gen{src_prog, callable.first};
-    rtl_prog.push_back(); // TODO
+  for (auto const &callable : src_prog.callables) {
+    RtlGen gen(src_prog, callable.first);
+    // rtl_prog.push_back(callable);
   }
-  return rtl_prog;
+
+  std::map<std::string, int> global_vars_top;
+  for (auto &var : src_prog.global_vars) {
+    int *val = var.second->init->eval();
+    if (val == NULL)
+      std::cerr << "Initialization for " << var.first << " not found.\n";
+    global_vars_top[var.first] = *val;
+  }
+  return {rtl_prog, global_vars_top};
 }
 
 } // namespace rtl

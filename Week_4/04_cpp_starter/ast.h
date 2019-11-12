@@ -92,6 +92,7 @@ struct Expr : public ASTNode {
   std::unique_ptr<Meta> meta{new Meta{Type::UNKNOWN}};
   virtual int binding_priority() const { return INT_MAX; }
   virtual void accept(ExprVisitor &vis) const = 0;
+  virtual int* eval() const { return NULL; }
 };
 
 #define MAKE_VISITABLE                                                         \
@@ -109,6 +110,7 @@ struct IntConstant : public Expr {
   MAKE_PRINTABLE
   MAKE_VISITABLE
   CONSTRUCTOR(IntConstant, int64_t value) : value(value) {}
+  int* eval() const override { return new int(value); }
 };
 
 struct BoolConstant : public Expr {
@@ -116,6 +118,12 @@ struct BoolConstant : public Expr {
   MAKE_PRINTABLE
   MAKE_VISITABLE
   CONSTRUCTOR(BoolConstant, bool value) : value(value) {}
+  int* eval() const override { 
+    if (value)
+      return new int(1);
+    else
+      return new int(0);
+  }
 };
 
 struct UnopApp : public Expr {

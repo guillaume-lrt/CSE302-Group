@@ -6,16 +6,18 @@
 #include "antlr4-runtime.h"
 
 #include "ast.h"
-#include "ast_rtl.h"
 #include "rtl.h"
 #include "type_check.h"
+#include "ast_rtl.h"
+#include "rtl_asm.h"
+#include "amd64.h"
 
 using namespace bx;
 
 int main(int argc, char *argv[]) {
   const std::string rt_flags = "-L build -lbxrt -Wl,-rpath," +
-                               std::filesystem::current_path().string() +
-                               "/build/";
+    std::filesystem::current_path().string() +
+    "/build/";
 
   if (argc >= 2) {
     std::string bx_file{argv[1]};
@@ -38,25 +40,37 @@ int main(int argc, char *argv[]) {
     std::cout << p_file << " written.\n";
 
     auto rtl_file = file_root + ".rtl";
-    auto rtl_prog = rtl::transform(prog);
+    std::pair<rtl::Program, std::map<std::string, int>> transform_res = rtl::transform(prog);
+    rtl::Program rtl_prog = transform_res.first;
+    std::map<std::string, int> global_vars = transform_res.second;
+
     std::ofstream rtl_out;
     rtl_out.open(rtl_file);
     for (auto const &gv : prog.global_vars)
       rtl_out << "GLOBAL " << gv.first << " = " << *(gv.second->init) << " : "
-              << gv.second->ty << "\n\n";
+        << gv.second->ty << "\n\n";
     for (auto const &rtl_cbl : rtl_prog)
       rtl_out << rtl_cbl << '\n';
     rtl_out.close();
     std::cout << rtl_file << " written.\n";
 
-/*
     auto s_file = file_root + ".s";
     auto asm_prog = rtl_to_asm(rtl_prog);
+    std::ofstream s_out(s_file);
 
-    std::ofstream s_out;
-    s_out.open(s_file);
-    for (auto const &l : asm_prog)
-      s_out << *l;
+    for (auto const &var : global_vars)
+      s_out << ".globl " << var.first << "\n";
+
+    s_out << ".section .data\n";
+    s_out << ".align 8\n";
+
+    for (auto const &var : global_vars)
+      s_out << var.first << ": .quad " << var.second << "\n";
+
+    for (auto const &func : asm_prog)
+      for (auto const &l : func)
+        s_out << *l;
+
     s_out.close();
     std::cout << s_file << " written.\n";
 
@@ -68,5 +82,5 @@ int main(int argc, char *argv[]) {
       std::exit(2);
     }
     std::cout << exe_file << " created.\n";
- */  }
+  }
 }
