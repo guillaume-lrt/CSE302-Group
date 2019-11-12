@@ -206,6 +206,21 @@ public:
       });
   }
 
+  // Abdel's idea
+  rtl::Callable &&cast() { return std::move(rtl_callable); }
+
+  // Virtual abtract my ass this costs me whole day debugging
+  void visit(source::Declare const &p) override {
+    Pseudo pseudo = get_pseudo(p.var);
+    p.init->accept(*this);
+    if (p.ty == Type::BOOL) {
+      intify();
+    }
+    add_sequential([&](auto next) {
+      return Copy::make(result, pseudo, next);
+    });
+  }
+
   void visit(source::Assign const &mv) override {
     auto source_reg = get_pseudo(mv.left);
     mv.right->accept(*this);
@@ -486,9 +501,10 @@ public:
 
 std::pair<rtl::Program, std::map<std::string, int>> transform(source::Program const &src_prog) {
   rtl::Program rtl_prog;
-  for (auto const &callable : src_prog.callables) {
-    RtlGen gen(src_prog, callable.first);
-    // rtl_prog.push_back(callable);
+  // callable type pair<string, Callable>
+  for (auto &callable : src_prog.callables) {
+    RtlGen generator(src_prog, callable.first);
+    rtl_prog.push_back(generator.cast());
   }
 
   std::map<std::string, int> global_vars_top;
