@@ -1,19 +1,24 @@
 grammar BX;
 
-program: (globalVar | proc | func)*;
+program: (globalVar | proc | func | type_abbrev)*;
+
+type_abbrev: 'type' ID '=' type ';';
+
+type: 'int64' | 'bool' | type '*' | type '[' NUM ']' | struct_type;
+struct_type: 'struct' '{' (struct_field (',' struct_field)*','?)? '}';
+struct_field: ID ':' type;
 
 globalVar:
         'var' globalVarInit (',' globalVarInit)* ':' type ';';
 globalVarInit: ID '=' (NUM | BOOL);
 
-proc: 'proc' ID '(' (param (',' param)*)? ')' block;
-func: 'fun' ID '(' (param (',' param)*)? ')' ':' type block;
+func: 'fun' ID '(' parameter_groups? ')' ':' type block; 
+proc: 'proc' ID '(' parameter_groups? ')' block;
 
-type: 'int64' | 'bool';
-
+parameter_groups: param (',' param)?;
 param: ID (',' ID)* ':' type;
 
-stmt: ID '=' expr ';'            # assign
+stmt: assignable '=' expr ';'    # assign
     | expr ';'                   # eval
     | varDecl                    # declare
     | 'print' expr ';'           # print
@@ -29,8 +34,9 @@ ifElse: 'if' '(' expr ')' block ('else' (ifElse | block))?;
 
 block: '{' stmt* '}';
 
-expr: ID                                       # variable
-    | ID '(' (expr (',' expr)*)? ')'           # call
+expr: ID '(' (expr (',' expr)*)? ')'           # call
+    | 'alloc' type '[' expr ']' | 'null' | '&' assignable   # allocat
+    | assignable			       # assign
     | NUM                                      # number
     | BOOL                                     # bool
     | op = ('~' | '-' | '!') expr              # unop
@@ -45,6 +51,8 @@ expr: ID                                       # variable
     | expr '&&' expr                           # logAnd
     | expr '||' expr                           # logOr
     | '(' expr ')'                             # parens;
+
+assignable: ID | '*'expr | expr '[' expr ']' | expr '.' ID | expr '->' ID;
 
 BOOL: 'true' | 'false';
 ID: [A-Za-z_][A-Za-z0-9_]*;
